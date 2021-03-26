@@ -1,14 +1,21 @@
-from typing import List, Tuple
+import os
+from typing import AnyStr, List, Tuple
 
 import face_recognition
 import numpy as np
+from PIL import Image
 
 
 class LinearIndex:
-    def __init__(self, embeddings: List[np.ndarray] = None):
+    def __init__(self, embeddings: List[np.ndarray] = None,
+                 ids: List[int] = None):
         self.embeddings = []
         if embeddings is not None:
             self.embeddings = list(embeddings)
+        if ids is None:
+            self.indices2ids = {i: i for i in range(len(self.embeddings))}
+        else:
+            self.indices2ids = {i: ids[i] for i in range(len(self.embeddings))}
 
     def __len__(self):
         return len(self.embeddings)
@@ -22,14 +29,15 @@ class LinearIndex:
         unzipped = tuple(zip(
             *sorted([(face_distances[i], int(i)) for i in top_indices])))
         distances = list(unzipped[0])
-        indices = list(unzipped[1])
-        return distances, indices
+        ids = [self.indices2ids[i] for i in unzipped[1]]
+        return distances, ids
 
-    def add_new_embedding(self, new_embedding):
+    def add_new_embedding(self, new_embedding: np.ndarray, new_id: int):
         if self.embeddings and new_embedding.shape != self.embeddings[0].shape:
             raise ValueError(f'Expected {self.embeddings[0].shape}, '
                              f'got {new_embedding.shape}')
         self.embeddings.append(new_embedding)
+        self.indices2ids[len(self.embeddings) - 1] = new_id
 
     def get_all_embeddings(self):
         return self.embeddings
@@ -37,15 +45,28 @@ class LinearIndex:
 
 class BigBrother:
     def __init__(self, embeddings=None, names=None, top_k: int = 5,
-                 model: str = 'small'):
+                 model: str = 'small', data_path: AnyStr = None):
         self.index = LinearIndex(embeddings)
-        self.names = []
+
+        self.names = {}
         if names is not None:
-            self.names = list(names)
+            self.names = dict(names)
+
         self.top_k = top_k
         if model not in ['small', 'large']:
             raise ValueError(f'Expected `model` is one of "small" or "large"')
         self.model = model
+
+        self.id_counter = 0
+        if names:
+            self.id_counter = max(self.names.keys()) + 1
+
+        if data_path is None:
+            data_path = '.'
+        images = os.path.join(data_path, 'images')
+        if not os.path.isdir(images):
+            os.makedirs(images)
+        self.images = images
 
     def __len__(self):
         return len(self.index)
@@ -70,19 +91,27 @@ class BigBrother:
             image, face_locations, model=self.model)[0]
         if top_k is None:
             top_k = self.top_k
-        distances, indices = self.index.get_nearest(face_encoding, top_k)
-        names = [self.names[i] for i in indices]
-        return distances, indices, names
+        distances, ids = self.index.get_nearest(face_encoding, top_k)
+        names = [self.names[i] for i in ids]
+        return distances, ids, names
 
-    def add_new_face(self, image: np.ndarray, name):
+    def add_new_face(self, image: np.ndarray, name: str):
         # TODO: add check for duplicate
         face_locations = [BigBrother._get_biggest_face_location(image)]
         face_encoding = face_recognition.face_encodings(
             image, face_locations, model=self.model)[0]
-        self.names.append(name)
-        self.index.add_new_embedding(face_encoding)
+        self.names[self.id_counter] = name
+        self.index.add_new_embedding(face_encoding, self.id_counter)
+        pil_image = Image.fromarray(image)
+        pil_image.save(os.path.join(self.images, f'{self.id_counter}.png'),
+                       'PNG')
+        self.id_counter += 1
 
     def get_all_data(self):
         return {'embeddings': self.index.get_all_embeddings(),
-                'names': self.names, 'top_k': self.top_k, 'model': self.model}
+                'names': self.names, 'top_k': self.top_k, 'model': self.model,
+                'data_path': self.images}
+
+    def get_images_folder(self) -> AnyStr:
+        return self.images
 

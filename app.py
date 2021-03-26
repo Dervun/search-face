@@ -6,6 +6,7 @@ from typing import List
 from flask import Flask, request
 from flask_cors import CORS
 import numpy as np
+from PIL import Image
 
 from big_brother import BigBrother
 
@@ -16,7 +17,6 @@ args = parser.parse_args()
 app = Flask(__name__)
 CORS(app)
 
-system = BigBrother()
 if not os.path.isdir(args.datadir):
     os.makedirs(args.datadir)
 data_file = os.path.join(args.datadir, 'all_data.pkl')
@@ -24,7 +24,9 @@ if os.path.isfile(data_file):
     with open(data_file, 'rb') as f:
         all_data = pickle.load(f)
     system = BigBrother(all_data['embeddings'], all_data['names'],
-                        all_data['top_k'], all_data['model'])
+                        all_data['top_k'], all_data['model'], args.datadir)
+else:
+    system = BigBrother(data_path=args.datadir)
 
 
 def image_from_list(list_image: List[List[int]]) -> np.ndarray:
@@ -61,9 +63,16 @@ def get_nearest():
         params = {'image': image}
         if 'top_k' in data:
             params['top_k'] = data['top_k']
-        distances, indices, names = system.get_nearest(**params)
-        answer = {'success': 1, 'distances': distances, 'indices': indices,
-                  'names': names}
+        distances, ids, names = system.get_nearest(**params)
+        # TODO: change to URL to S3
+        images_folder = system.get_images_folder()
+        images = []
+        for i in ids:
+            current_path = os.path.join(images_folder, f'{i}.png')
+            images.append(np.array(Image.open(current_path),
+                                   dtype=np.uint8).tolist())
+        answer = {'success': 1, 'distances': distances, 'indices': ids,
+                  'names': names, 'images': images}
     except Exception:
         answer = {'success': 0, 'message': 'Something went wrong'}
 
@@ -96,7 +105,7 @@ def add_face_photo():
         name = data['name']
         system.add_new_face(image, name)
 
-        # TODO: change writing to disk to writing to MongoDB
+        # TODO: change writing to disk to writing to some DB
         with open(data_file, 'wb') as f:
             new_dump = system.get_all_data()
             pickle.dump(new_dump, f)
