@@ -1,7 +1,10 @@
 import argparse
+from base64 import b64encode
+import io
 import os
 import pickle
 from typing import List
+from urllib.parse import quote
 
 from flask import Flask, request
 from flask_cors import CORS
@@ -40,7 +43,7 @@ def image_from_list(list_image: List[List[int]]) -> np.ndarray:
 @app.route('/get_nearest', methods=['GET'])
 def get_nearest():
     data = request.get_json()  # Get data posted as a json
-    # check that all the required parameters have provided
+    # check that all the required parameters have been provided
     expected_variables = ('image',)
     for variable in expected_variables:
         if variable not in data:
@@ -79,10 +82,51 @@ def get_nearest():
     return answer
 
 
+@app.route('/get_nearest_compressed', methods=['POST', 'GET'])
+def get_nearest_compressed():
+    if 'image' not in request.files:
+        answer = {
+            'success': 0,
+            'message': 'Expected `image` file, for example: curl -F '
+                       '"image=@some_image.png" .../get_nearest_compressed'}
+        return answer
+
+    try:
+        image_binary = request.files['image'].read()
+        pil_image = Image.open(io.BytesIO(image_binary))
+        image = np.array(pil_image, dtype=np.uint8)
+    except Exception:
+        answer = {
+            'success': 0,
+            'message': 'Wrong image format'}
+        return answer
+
+    try:
+        params = {'image': image}
+        if 'top_k' in request.values:
+            params['top_k'] = int(request.values['top_k'])
+        distances, ids, names = system.get_nearest(**params)
+        # TODO: change to URL to S3
+        images_folder = system.get_images_folder()
+        images = []
+        for i in ids:
+            current_path = os.path.join(images_folder, f'{i}.png')
+            with open(current_path, 'rb') as f:
+                image_binary = f.read()
+            data = b64encode(image_binary).decode('ascii')
+            images.append(f'data:image/png;base64,{quote(data)}')
+        answer = {'success': 1, 'distances': distances, 'indices': ids,
+                  'names': names, 'images': images}
+    except Exception:
+        answer = {'success': 0, 'message': 'Something went wrong'}
+
+    return answer
+
+
 @app.route('/add_face_photo', methods=['POST'])
 def add_face_photo():
     data = request.get_json()  # Get data posted as a json
-    # check that all the required parameters have provided
+    # check that all the required parameters have been provided
     # TODO: change name to unique ID
     expected_variables = ('image', 'name')
     for variable in expected_variables:
@@ -103,6 +147,41 @@ def add_face_photo():
 
     try:
         name = data['name']
+        system.add_new_face(image, name)
+
+        # TODO: change writing to disk to writing to some DB
+        with open(data_file, 'wb') as f:
+            new_dump = system.get_all_data()
+            pickle.dump(new_dump, f)
+        answer = {'success': 1, 'message': 'All right :)'}
+    except Exception:
+        answer = {'success': 0, 'message': 'Something went wrong'}
+
+    return answer
+
+
+@app.route('/add_face_photo_compressed', methods=['POST'])
+def add_face_photo_compressed():
+    if 'image' not in request.files or 'name' not in request.values:
+        answer = {
+            'success': 0,
+            'message': 'Expected `image` file and `name` parameter, for '
+                       'example: curl -F "image=@some_image.png" -F '
+                       '"name=First Last" .../add_face_photo_compressed'}
+        return answer
+
+    try:
+        image_binary = request.files['image'].read()
+        pil_image = Image.open(io.BytesIO(image_binary))
+        image = np.array(pil_image, dtype=np.uint8)
+    except Exception:
+        answer = {
+            'success': 0,
+            'message': 'Wrong image format'}
+        return answer
+
+    try:
+        name = request.values['name']
         system.add_new_face(image, name)
 
         # TODO: change writing to disk to writing to some DB
