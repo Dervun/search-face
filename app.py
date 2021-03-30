@@ -66,6 +66,7 @@ def get_nearest():
         if 'top_k' in data:
             params['top_k'] = data['top_k']
         distances, ids, names = system.get_nearest(**params)
+        ids = [str(x) for x in ids]
         answer = {'success': 1, 'distances': distances, 'ids': ids,
                   'names': names}
     except Exception:
@@ -98,6 +99,7 @@ def get_nearest_compressed():
         if 'top_k' in request.values:
             params['top_k'] = int(request.values['top_k'])
         distances, ids, names = system.get_nearest(**params)
+        ids = [str(x) for x in ids]
 
         answer = {'success': 1, 'distances': distances, 'ids': ids,
                   'names': names}
@@ -120,7 +122,7 @@ def get_images_by_id():
 
     try:
         ids = data['id']
-        if isinstance(ids, int):
+        if isinstance(ids, str):
             ids = [ids]
 
         # TODO: change to URL to S3
