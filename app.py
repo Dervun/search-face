@@ -51,7 +51,6 @@ def get_nearest():
                       'message': f'Expected `{variable}` variable'}
             return answer
 
-    # TODO: is it the most convenient format?
     try:
         image = image_from_list(data['image'])
     except Exception:
@@ -67,15 +66,9 @@ def get_nearest():
         if 'top_k' in data:
             params['top_k'] = data['top_k']
         distances, ids, names = system.get_nearest(**params)
-        # TODO: change to URL to S3
-        images_folder = system.get_images_folder()
-        images = []
-        for i in ids:
-            current_path = os.path.join(images_folder, f'{i}.png')
-            images.append(np.array(Image.open(current_path),
-                                   dtype=np.uint8).tolist())
-        answer = {'success': 1, 'distances': distances, 'indices': ids,
-                  'names': names, 'images': images}
+        ids = [str(x) for x in ids]
+        answer = {'success': 1, 'distances': distances, 'ids': ids,
+                  'names': names}
     except Exception:
         answer = {'success': 0, 'message': 'Something went wrong'}
 
@@ -106,17 +99,55 @@ def get_nearest_compressed():
         if 'top_k' in request.values:
             params['top_k'] = int(request.values['top_k'])
         distances, ids, names = system.get_nearest(**params)
+        ids = [str(x) for x in ids]
+
+        answer = {'success': 1, 'distances': distances, 'ids': ids,
+                  'names': names}
+    except Exception:
+        answer = {'success': 0, 'message': 'Something went wrong'}
+
+    return answer
+
+
+@app.route('/get_images_by_id', methods=['GET'])
+def get_images_by_id():
+    data = request.get_json()  # Get data posted as a json
+    # check that all the required parameters have been provided
+    expected_variables = ('id',)
+    for variable in expected_variables:
+        if variable not in data:
+            answer = {'success': 0,
+                      'message': f'Expected `{variable}` variable'}
+            return answer
+
+    try:
+        ids = data['id']
+        if isinstance(ids, str):
+            ids = [ids]
+
         # TODO: change to URL to S3
         images_folder = system.get_images_folder()
         images = []
         for i in ids:
             current_path = os.path.join(images_folder, f'{i}.png')
-            with open(current_path, 'rb') as f:
-                image_binary = f.read()
-            data = b64encode(image_binary).decode('ascii')
-            images.append(f'data:image/png;base64,{quote(data)}')
-        answer = {'success': 1, 'distances': distances, 'indices': ids,
-                  'names': names, 'images': images}
+            images.append(current_path)
+        image_format = data.get('format', 'raw')
+        if image_format == 'raw':
+            result = [np.array(Image.open(p), dtype=np.uint8).tolist()
+                      for p in images]
+        elif image_format == 'base64':
+            result = []
+            for p in images:
+                with open(p, 'rb') as f:
+                    image_binary = f.read()
+                data = b64encode(image_binary).decode('ascii')
+                result.append(f'data:image/png;base64,{quote(data)}')
+        else:
+            answer = {'success': 0,
+                      'message': 'Unknown format, expected "raw", "base64"'}
+            return answer
+        answer = {'success': 1, 'images': result}
+
     except Exception:
         answer = {'success': 0, 'message': 'Something went wrong'}
 
@@ -198,7 +229,7 @@ def add_face_photo_compressed():
 def main():
     from waitress import serve
     serve(app, host="0.0.0.0", port=8080)
-    # app.run(host='0.0.0.0', port=5000)
+    # app.run(host='0.0.0.0', port=8080)
 
 
 if __name__ == '__main__':
